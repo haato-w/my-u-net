@@ -1,6 +1,17 @@
+import os
+import sys
+from datetime import datetime
+from PIL import Image
+import matplotlib.pyplot as plt
+import numpy as np
+from tqdm import tqdm
+import shutil
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
+import imageio
+
 
 def sh9(viewdirs): #viewdirs: [B, 3, H, W], unit vectors
   x, y, z = viewdirs[:, 0:1], viewdirs[:, 1:2], viewdirs[:, 2:3]
@@ -168,15 +179,124 @@ class DNRUNet(nn.Module):
     rgb = torch.sigmoid(rgb)
     return rgb
 
-B, C_in, H, W = 2, 16, 540, 960
+# B, C_in, H, W = 2, 16, 540, 960
+# Fscr = torch.randn(B, C_in, H, W)
+# vdirs = F.normalize(torch.randn(B, 3, H, W), dim=1)
+
+# netA = DNRUNet(c_in=C_in, base_ch=64, sh_mode="broadcast", aux_ch=0)
+# rgbA = netA(Fscr, vdirs)
+
+# netB = DNRUNet(c_in=C_in, base_ch=64, sh_mode="coeff", sh_out=32, sh_reduce="sum")
+# rgbB = netB(Fscr, vdirs)
+
+# pred = netA(Fscr, vdirs)
+# loss_img = (pred, gt_image).abs().mean()
+
+
+device = torch.device('cpu')
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+elif torch.backends.mps.is_available():
+    device = torch.device('mps') # for MAC
+print("device: ", device)
+
+
+"""
+Config
+"""
+EPOCH_NUM = 300
+video_interval = 100
+H, W = 512, 512
+CHANEL = 3
+gt_image_path = 'resources/checkered_boots_cropped.png'
+result_dir = 'result'
+
+"""
+Preparating directory
+"""
+if 1 < len(sys.argv):
+    experiment_name = sys.argv[1]
+else:
+    experiment_name = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
+    print(f"No experiment name is given. Using datatime {experiment_name} as experiment name.")
+
+output_dir = os.path.join(result_dir, experiment_name)
+os.makedirs(output_dir)
+in_training_imgs_dir = os.path.join(output_dir, 'in_training_imgs')
+os.makedirs(in_training_imgs_dir)
+
+"""
+Loading and processing GT image
+"""
+gt_image = Image.open(gt_image_path)
+gt_image = gt_image.resize((H, W)) # fit to kernel_size
+gt_image = gt_image.convert('RGB')
+gt_image_array = np.array(gt_image)
+gt_image_array = gt_image_array / 255.0
+# Creating tensor of ground-truth image
+target_tensor = torch.tensor(gt_image_array, dtype=torch.float32, device=device)
+# Saving processed gt image
+plt.imsave(os.path.join(output_dir, "processed_gt_image.png"), target_tensor.detach().cpu().numpy())
+flat_target_tensor = target_tensor.reshape(-1, CHANEL)
+
+"""
+Preparing model input
+"""
+B, C_in, H, W = 1, 16, 540, 960
 Fscr = torch.randn(B, C_in, H, W)
 vdirs = F.normalize(torch.randn(B, 3, H, W), dim=1)
 
-netA = DNRUNet(c_in=C_in, base_ch=64, sh_mode="broadcast", aux_ch=0)
-rgbA = netA(Fscr, vdirs)
 
-netB = DNRUNet(c_in=C_in, base_ch=64, sh_mode="coeff", sh_out=32, sh_reduce="sum")
-rgbB = netB(Fscr, vdirs)
+# netA = DNRUNet(c_in=C_in, base_ch=64, sh_mode="broadcast", aux_ch=0)
+netB = DNRUNet(c_in=C_in, base_ch=64, sh_mode="coeff", sh_out=32, sh_reduce="sum").to(device)
+optimizer = optim.Adam([netB.parameters(), Fscr], lr=1e-3)
 
-pred = netA(Fscr, vdirs)
-loss_img = (pred, gt_image).abs().mean()
+progress_bar = tqdm(range(1, EPOCH_NUM + 1))
+progress_bar.set_description("[train]")
+
+for epoch in progress_bar:
+    optimizer.zero_grad()
+    pred = netB(Fscr, vdirs)
+    loss = F.mse_loss(pred, flat_target_tensor, reduction='sum')
+    loss.backward()
+    optimizer.step()
+
+    with torch.no_grad():
+        # Displaying Loss value
+        if epoch % 10 == 0:
+            loss_value = {'Loss': f"{loss.item():.{5}f}"}
+            progress_bar.set_postfix(loss_value)
+        # Saving rendered image for training video
+        if epoch % video_interval == 0:
+            rendered_image = pred.reshape(H, W, CHANEL)
+            output_img_array = rendered_image.cpu().detach().numpy()
+            plt.imsave(os.path.join(in_training_imgs_dir, f'rendered_output_image_{epoch}.png'), output_img_array)
+
+print('Training complete')
+
+"""
+Postprocessing
+"""
+print('Postprocessing')
+# Visulizing trained image
+rendered_image = pred.reshape(H, W, CHANEL)
+output_img_array = rendered_image.cpu().detach().numpy()
+plt.imsave(os.path.join(output_dir, f'final_rendered_output_image_{epoch}.png'), output_img_array)
+
+# Creating video
+video_writer = imageio.get_writer(os.path.join(output_dir, 'training.mp4'), fps=2)
+
+fnames = os.listdir(in_training_imgs_dir)
+fnames.sort(key = lambda x: int(x.split('.')[0].split('_')[-1]))
+for training_img_fname in fnames:
+  training_img_path = os.path.join(in_training_imgs_dir, training_img_fname)
+  training_img = imageio.v3.imread(training_img_path)
+  video_writer.append_data(training_img)
+
+video_writer.close()
+
+# Removing temporary traing images
+shutil.rmtree(in_training_imgs_dir)
+
+print('Done')
+
