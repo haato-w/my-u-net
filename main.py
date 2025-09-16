@@ -41,14 +41,30 @@ class SHGate(nn.Module):
         return gated.reshape(B, 9 * coeff.shape[2], H, W)
       else:
         raise ValueError("reduce must be 'sum' or 'concat'")
-  
-def conv_block(in_ch, out_ch, k=3, s=1, p=1, groups=8):
+
+"""
+Convolution層のセット
+Convolution > Norm > ReLU
+Defaultだとconvolutionによるサイズの縮小はないので元のU-Netと少し異なる
+"""
+def conv_block(
+  in_ch: int, # 入力チャネル数 (チャネル方向にも畳み込みがされる)
+  out_ch: int, # 出力チャネル数
+  k: int=3, # kernel size
+  s: int=1, # stride size
+  p: int=1, # padding amount
+  groups: int=8 # group-wise convolution (これ論文にある？)
+) -> nn.Sequential:
   return nn.Sequential(
     nn.Conv2d(in_ch, out_ch, k, s, p, bias=False), 
     nn.GroupNorm(num_groups=min(groups, out_ch), num_channels=out_ch), 
     nn.ReLU(inplace=True)
   )
 
+"""
+Convolution層2つとMaxPooling層のセット
+U-Netの前半部分に使用される
+"""
 class Down(nn.Module):
   def __init__(self, in_ch, out_ch):
     super().__init__()
@@ -64,6 +80,10 @@ class Down(nn.Module):
     x = self.pool(x)
     return x, skip
 
+"""
+UpSamplingとConvolution層2つのセット
+U-Netの後半部分に使用される
+"""
 class Up(nn.Module):
   def __init__(self, in_ch, out_ch):
     super().__init__()
@@ -78,7 +98,7 @@ class Up(nn.Module):
     diffY = skip.size(2) - x.size(2)
     diffX = skip.size(3) - x.size(3)
     if diffY != 0 or diffX != 0:
-      x = F.pad(x, (0, diffX, 0, diffY))
+      x = F.pad(x, (0, diffX, 0, diffY)) # skipとxのサイズを合わせるためのpadding
     x = torch.cat([skip, x], dim=1)
     x = self.block(x)
     return x
@@ -103,7 +123,7 @@ class DNRUNet(nn.Module):
       assert sh_out is not None
       gated_out = (sh_out if sh_reduce == "sum" else 9 * sh_out)
       enc_in = gated_out + aux_ch
-      self.sh_gate = SHGate(c_in, out_ch=sh_mode, sh_mode="coeff", reduce=sh_reduce)
+      self.sh_gate = SHGate(c_in, out_ch=sh_out, sh_mode="coeff", reduce=sh_reduce)
     
     # Encoder (5 steps)
     self.in_conv = conv_block(enc_in, base_ch)
@@ -133,7 +153,7 @@ class DNRUNet(nn.Module):
     # U-Net
     x = self.in_conv(x)
     x, s1 = self.down1(x)
-    x, s2= self.down2(x)
+    x, s2 = self.down2(x)
     x, s3 = self.down3(x)
     x, s4 = self.down4(x)
 
