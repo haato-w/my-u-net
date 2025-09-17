@@ -79,7 +79,7 @@ U-Netの前半部分に使用される
 class Down(nn.Module):
   def __init__(self, in_ch, out_ch):
     super().__init__()
-    self.block = nn.Sequetial(
+    self.block = nn.Sequential(
       conv_block(in_ch, out_ch), 
       conv_block(out_ch, out_ch), 
     )
@@ -96,9 +96,10 @@ UpSamplingとConvolution層2つのセット
 U-Netの後半部分に使用される
 """
 class Up(nn.Module):
-  def __init__(self, in_ch, out_ch):
+  def __init__(self, in_ch, skip_ch, out_ch):
     super().__init__()
     self.up = nn.ConvTranspose2d(in_ch, out_ch, kernel_size=2, stride=2)
+    self.skip_proj = nn.Conv2d(skip_ch, out_ch, kernel_size=1, bias=False)
     self.block = nn.Sequential(
       conv_block(out_ch * 2, out_ch), 
       conv_block(out_ch, out_ch), 
@@ -110,6 +111,7 @@ class Up(nn.Module):
     diffX = skip.size(3) - x.size(3)
     if diffY != 0 or diffX != 0:
       x = F.pad(x, (0, diffX, 0, diffY)) # skipとxのサイズを合わせるためのpadding
+    skip = self.skip_proj(skip)
     x = torch.cat([skip, x], dim=1)
     x = self.block(x)
     return x
@@ -141,19 +143,19 @@ class DNRUNet(nn.Module):
     self.down1 = Down(base_ch, base_ch * 2)
     self.down2 = Down(base_ch * 2, base_ch * 4)
     self.down3 = Down(base_ch * 4, base_ch * 8)
-    self.down4 = Down(base_ch * 8, base_ch * 8)
+    self.down4 = Down(base_ch * 8, base_ch * 16)
     
     # Bottleneck
     self.bot = nn.Sequential(
-      conv_block(base_ch * 8, base_ch * 8), 
-      conv_block(base_ch * 8, base_ch * 8), 
+      conv_block(base_ch * 16, base_ch * 16), 
+      conv_block(base_ch * 16, base_ch * 16), 
     )
 
     # Decoder
-    self.up4 = Up(base_ch * 8, base_ch * 8)
-    self.up3 = Up(base_ch * 8, base_ch * 4)
-    self.up2 = Up(base_ch * 4, base_ch * 2)
-    self.up1 = Up(base_ch * 2, base_ch)
+    self.up4 = Up(in_ch=base_ch * 16, skip_ch=base_ch * 16, out_ch=base_ch * 8)
+    self.up3 = Up(in_ch=base_ch * 8, skip_ch=base_ch * 8, out_ch=base_ch * 4)
+    self.up2 = Up(in_ch=base_ch * 4, skip_ch=base_ch * 4, out_ch=base_ch * 2)
+    self.up1 = Up(in_ch=base_ch * 2, skip_ch=base_ch * 2, out_ch=base_ch)
 
     self.out_conv = nn.Conv2d(base_ch, 3, kernel_size=1)
   
@@ -204,8 +206,8 @@ print("device: ", device)
 """
 Config
 """
-EPOCH_NUM = 300
-video_interval = 100
+EPOCH_NUM = 1000
+video_interval = 50
 H, W = 512, 512
 CHANEL = 3
 gt_image_path = 'resources/checkered_boots_cropped.png'
@@ -237,19 +239,20 @@ gt_image_array = gt_image_array / 255.0
 target_tensor = torch.tensor(gt_image_array, dtype=torch.float32, device=device)
 # Saving processed gt image
 plt.imsave(os.path.join(output_dir, "processed_gt_image.png"), target_tensor.detach().cpu().numpy())
-flat_target_tensor = target_tensor.reshape(-1, CHANEL)
+target_tensor = target_tensor.permute(2,0,1).unsqueeze(0)   # [1,3,H,W]
 
 """
 Preparing model input
 """
-B, C_in, H, W = 1, 16, 540, 960
-Fscr = torch.randn(B, C_in, H, W)
-vdirs = F.normalize(torch.randn(B, 3, H, W), dim=1)
+B, C_in = 1, 16
+# Fscr = torch.randn(B, C_in, H, W).to(device)
+Fscr = nn.Parameter(torch.randn(B, C_in, H, W, device=device), requires_grad=True)
+vdirs = F.normalize(torch.randn(B, 3, H, W), dim=1).to(device)
 
 
 # netA = DNRUNet(c_in=C_in, base_ch=64, sh_mode="broadcast", aux_ch=0)
 netB = DNRUNet(c_in=C_in, base_ch=64, sh_mode="coeff", sh_out=32, sh_reduce="sum").to(device)
-optimizer = optim.Adam([netB.parameters(), Fscr], lr=1e-3)
+optimizer = optim.Adam([*netB.parameters(), Fscr], lr=1e-3)
 
 progress_bar = tqdm(range(1, EPOCH_NUM + 1))
 progress_bar.set_description("[train]")
@@ -257,7 +260,7 @@ progress_bar.set_description("[train]")
 for epoch in progress_bar:
     optimizer.zero_grad()
     pred = netB(Fscr, vdirs)
-    loss = F.mse_loss(pred, flat_target_tensor, reduction='sum')
+    loss = F.mse_loss(pred, target_tensor, reduction='sum')
     loss.backward()
     optimizer.step()
 
@@ -268,7 +271,8 @@ for epoch in progress_bar:
             progress_bar.set_postfix(loss_value)
         # Saving rendered image for training video
         if epoch % video_interval == 0:
-            rendered_image = pred.reshape(H, W, CHANEL)
+            rendered_image = pred[0].permute(1, 2, 0).contiguous()
+            # rendered_image = pred.reshape(H, W, CHANEL)
             output_img_array = rendered_image.cpu().detach().numpy()
             plt.imsave(os.path.join(in_training_imgs_dir, f'rendered_output_image_{epoch}.png'), output_img_array)
 
@@ -279,7 +283,8 @@ Postprocessing
 """
 print('Postprocessing')
 # Visulizing trained image
-rendered_image = pred.reshape(H, W, CHANEL)
+rendered_image = pred[0].permute(1, 2, 0).contiguous()
+# rendered_image = pred.reshape(H, W, CHANEL)
 output_img_array = rendered_image.cpu().detach().numpy()
 plt.imsave(os.path.join(output_dir, f'final_rendered_output_image_{epoch}.png'), output_img_array)
 

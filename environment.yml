@@ -20,3 +20,4 @@ dependencies:
     - opencv-python
     - joblib
     - imageio
+    - imageio[ffmpeg]
