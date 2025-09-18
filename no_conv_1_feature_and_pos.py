@@ -53,8 +53,6 @@ EPOCH_NUM = 1000
 video_interval = 50
 H, W = 512, 512
 CHANEL = 3
-encoding_dim_x = 10 # should be 1 at least
-encoding_dim_y = 10 # should be 1 at least
 gt_image_path = 'resources/checkered_boots_cropped.png'
 result_dir = 'result'
 
@@ -90,6 +88,9 @@ flat_target_tensor = target_tensor.reshape(-1, CHANEL)
 Preparing model input
 """
 C_in = 16
+encoding_dim_x = 10 # should be 1 at least
+encoding_dim_y = 10 # should be 1 at least
+
 Fscr = nn.Parameter(torch.randn(C_in, device=device).reshape(-1, C_in), requires_grad=True)
 
 xs = torch.linspace(-1, 1, steps=W, device=device)
@@ -113,11 +114,10 @@ progress_bar = tqdm(range(1, EPOCH_NUM + 1))
 progress_bar.set_description("[train]")
 loss_records = []
 
-Fscr_repeated = Fscr.expand(coords.shape[0], -1)  # (H*W, C_in)
-model_input = torch.cat([coords, Fscr_repeated], dim=1)  # (H*W, C_in+encoding_dim_x+encoding_dim_y)
-
 for epoch in progress_bar:
     optimizer.zero_grad()
+    Fscr_repeated = Fscr.expand(coords.shape[0], -1)  # (H*W, C_in)
+    model_input = torch.cat([coords, Fscr_repeated], dim=1)  # (H*W, C_in+encoding_dim_x+encoding_dim_y)
     pred = model(model_input)
     loss = F.mse_loss(pred, flat_target_tensor, reduction='sum')
     loss.backward()
