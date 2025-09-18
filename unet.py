@@ -12,6 +12,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 import imageio
 
+"""
+neural texture & U-Net(Convolution) renderer
+"""
 
 def sh9(viewdirs): #viewdirs: [B, 3, H, W], unit vectors
   x, y, z = viewdirs[:, 0:1], viewdirs[:, 1:2], viewdirs[:, 2:3]

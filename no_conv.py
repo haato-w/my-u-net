@@ -12,6 +12,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 import imageio
 
+"""
+neural texture & tiny MLP renderer
+"""
 
 class PixelMLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dims = [64] * 2):
