@@ -13,7 +13,7 @@ import torch.optim as optim
 import imageio
 
 """
-1 feature vectore and position (positional encoding) & tiny MLP renderer
+1 feature vector and position (positional encoding) & tiny MLP renderer
 """
 
 class PixelMLP(nn.Module):
