@@ -245,7 +245,6 @@ target_tensor = target_tensor.permute(2,0,1).unsqueeze(0)   # [1,3,H,W]
 Preparing model input
 """
 B, C_in = 1, 16
-# Fscr = torch.randn(B, C_in, H, W).to(device)
 Fscr = nn.Parameter(torch.randn(B, C_in, H, W, device=device), requires_grad=True)
 vdirs = F.normalize(torch.randn(B, 3, H, W), dim=1).to(device)
 
@@ -256,6 +255,7 @@ optimizer = optim.Adam([*netB.parameters(), Fscr], lr=1e-3)
 
 progress_bar = tqdm(range(1, EPOCH_NUM + 1))
 progress_bar.set_description("[train]")
+loss_records = []
 
 for epoch in progress_bar:
     optimizer.zero_grad()
@@ -265,6 +265,8 @@ for epoch in progress_bar:
     optimizer.step()
 
     with torch.no_grad():
+        loss_records.append(loss.item())
+
         # Displaying Loss value
         if epoch % 10 == 0:
             loss_value = {'Loss': f"{loss.item():.{5}f}"}
@@ -272,7 +274,6 @@ for epoch in progress_bar:
         # Saving rendered image for training video
         if epoch % video_interval == 0:
             rendered_image = pred[0].permute(1, 2, 0).contiguous()
-            # rendered_image = pred.reshape(H, W, CHANEL)
             output_img_array = rendered_image.cpu().detach().numpy()
             plt.imsave(os.path.join(in_training_imgs_dir, f'rendered_output_image_{epoch}.png'), output_img_array)
 
@@ -281,12 +282,19 @@ print('Training complete')
 """
 Postprocessing
 """
-print('Postprocessing')
+print('Postprocessing...')
 # Visulizing trained image
 rendered_image = pred[0].permute(1, 2, 0).contiguous()
-# rendered_image = pred.reshape(H, W, CHANEL)
 output_img_array = rendered_image.cpu().detach().numpy()
 plt.imsave(os.path.join(output_dir, f'final_rendered_output_image_{epoch}.png'), output_img_array)
+
+# save loss figure
+loss_fname = "loss.png"
+plt.plot(range(EPOCH_NUM), loss_records)
+plt.title('Loss vs. Epochs')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.savefig(os.path.join(output_dir, loss_fname), bbox_inches='tight')
 
 # Creating video
 video_writer = imageio.get_writer(os.path.join(output_dir, 'training.mp4'), fps=2)
