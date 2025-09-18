@@ -14,6 +14,7 @@ import imageio
 
 """
 multi feature on each grid vector and position (positional encoding) & tiny MLP renderer
+Mix feature and position with convolution
 """
 
 class PixelMLP(nn.Module):
