@@ -16,45 +16,45 @@ import imageio
 neural texture & U-Net(Convolution) renderer
 """
 
-def sh9(viewdirs): #viewdirs: [B, 3, H, W], unit vectors
-  x, y, z = viewdirs[:, 0:1], viewdirs[:, 1:2], viewdirs[:, 2:3]
-  c0, c1, c2, c3, c4 = 0.282095, 0.488603, 1.092548, 0.315392, 0.546274
-  Y = torch.cat([
-    c0 + 0.0 * x, 
-    c1 * y, c1 * z, c1 * x, 
-    c2 * x * y, c2 * y * z, c3 * (3 * z * z - 1), 
-    c2 * x * z, c4 * (x * x - y * y)
-  ], dim=1)
-  return Y
+# def sh9(viewdirs): #viewdirs: [B, 3, H, W], unit vectors
+#   x, y, z = viewdirs[:, 0:1], viewdirs[:, 1:2], viewdirs[:, 2:3]
+#   c0, c1, c2, c3, c4 = 0.282095, 0.488603, 1.092548, 0.315392, 0.546274
+#   Y = torch.cat([
+#     c0 + 0.0 * x, 
+#     c1 * y, c1 * z, c1 * x, 
+#     c2 * x * y, c2 * y * z, c3 * (3 * z * z - 1), 
+#     c2 * x * z, c4 * (x * x - y * y)
+#   ], dim=1)
+#   return Y
 
-class SHGate(nn.Module):
-  def __init__(self, in_ch, out_ch=None, sh_mode="broadcast", reduce="sum"):
-    super().__init__()
-    assert sh_mode in ["broadcast", "coeff"]
-    self.sh_mode = sh_mode
-    self.reduce = reduce
-    if sh_mode == "coeff":
-      assert out_ch is not None, "coeff mode requires out_sh"
-      self.proj = nn.Conv2d(in_ch, 9 * out_ch, kernel_size=1, bias=True)
+# class SHGate(nn.Module):
+#   def __init__(self, in_ch, out_ch=None, sh_mode="broadcast", reduce="sum"):
+#     super().__init__()
+#     assert sh_mode in ["broadcast", "coeff"]
+#     self.sh_mode = sh_mode
+#     self.reduce = reduce
+#     if sh_mode == "coeff":
+#       assert out_ch is not None, "coeff mode requires out_sh"
+#       self.proj = nn.Conv2d(in_ch, 9 * out_ch, kernel_size=1, bias=True)
     
-  def forward(self, Fscr, viewdirs):
-    Y = sh9(viewdirs)
-    if self.sh_mode == "broadcast":
-      B, C, H, W = Fscr.shape
-      F9 = Fscr.unsqueeze(1) * Y.unsqueeze(2)
-      F9 = F9.reshape(B, 9 * C, H, W)
-      return F9
-    else:
-      B, _, H, W = Fscr.shape
-      coeff = self.proj(Fscr)
-      coeff = coeff.view(B, 9, -1, H, W)
-      gated = coeff * Y.unsqueeze(2)
-      if self.reduce == "sum":
-        return gated.sum(dim=1)
-      elif self.reduce == "concat":
-        return gated.reshape(B, 9 * coeff.shape[2], H, W)
-      else:
-        raise ValueError("reduce must be 'sum' or 'concat'")
+#   def forward(self, Fscr, viewdirs):
+#     Y = sh9(viewdirs)
+#     if self.sh_mode == "broadcast":
+#       B, C, H, W = Fscr.shape
+#       F9 = Fscr.unsqueeze(1) * Y.unsqueeze(2)
+#       F9 = F9.reshape(B, 9 * C, H, W)
+#       return F9
+#     else:
+#       B, _, H, W = Fscr.shape
+#       coeff = self.proj(Fscr)
+#       coeff = coeff.view(B, 9, -1, H, W)
+#       gated = coeff * Y.unsqueeze(2)
+#       if self.reduce == "sum":
+#         return gated.sum(dim=1)
+#       elif self.reduce == "concat":
+#         return gated.reshape(B, 9 * coeff.shape[2], H, W)
+#       else:
+#         raise ValueError("reduce must be 'sum' or 'concat'")
 
 """
 Convolution層のセット
