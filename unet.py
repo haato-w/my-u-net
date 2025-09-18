@@ -14,6 +14,7 @@ import imageio
 
 """
 neural texture & U-Net(Convolution) renderer
+shのためのview directionはランダム値を入れている
 """
 
 def sh9(viewdirs): #viewdirs: [B, 3, H, W], unit vectors
