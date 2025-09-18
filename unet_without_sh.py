@@ -162,7 +162,7 @@ class DNRUNet(nn.Module):
 
     self.out_conv = nn.Conv2d(base_ch, 3, kernel_size=1)
   
-  def forward(self, Fscr, vdirs, aux=None):
+  def forward(self, Fscr):
     # gated = self.sh_gate(Fscr, vdirs)
     # x = gated if aux is None else torch.cat([gated, aux], dim=1)
 
@@ -249,7 +249,6 @@ Preparing model input
 """
 B, C_in = 1, 16
 Fscr = nn.Parameter(torch.randn(B, C_in, H, W, device=device), requires_grad=True)
-vdirs = F.normalize(torch.randn(B, 3, H, W), dim=1).to(device)
 
 
 # netA = DNRUNet(c_in=C_in, base_ch=64, sh_mode="broadcast", aux_ch=0)
@@ -262,7 +261,7 @@ loss_records = []
 
 for epoch in progress_bar:
     optimizer.zero_grad()
-    pred = netB(Fscr, vdirs)
+    pred = netB(Fscr)
     loss = F.mse_loss(pred, target_tensor, reduction='sum')
     loss.backward()
     optimizer.step()
