@@ -113,26 +113,36 @@ pos_dim = encoding_dim_x + encoding_dim_y
 
 Fscr = nn.Parameter(torch.randn(n_grid * n_grid, C_in, device=device), requires_grad=True)
 
-xs = torch.linspace(-1, 1, steps=W, device=device)
-ys = torch.linspace(-1, 1, steps=H, device=device)
-grid_x, grid_y = torch.meshgrid(xs, ys, indexing='ij')
+xs = torch.arange(W, device=device)
+ys = torch.arange(H, device=device)
+global_x, global_y = torch.meshgrid(xs, ys, indexing='ij')  # (W, H)
 
-input_stack = [grid_x]
+# 各ピクセルのgridインデックス
+x_grid_idx = torch.div(global_x, W // n_grid, rounding_mode='floor').clamp(max=n_grid-1)
+y_grid_idx = torch.div(global_y, H // n_grid, rounding_mode='floor').clamp(max=n_grid-1)
+
+# 各grid内でのlocal座標 (0 ~ grid_size-1)
+local_x = global_x - x_grid_idx * (W // n_grid)
+local_y = global_y - y_grid_idx * (H // n_grid)
+
+# local座標を-1〜1に正規化
+grid_size_x = W // n_grid
+grid_size_y = H // n_grid
+local_x_norm = 2 * (local_x.float() / (grid_size_x - 1)) - 1
+local_y_norm = 2 * (local_y.float() / (grid_size_y - 1)) - 1
+
+input_stack = [local_x_norm]
 for i in range(encoding_dim_x - 1):
-    input_stack.append(torch.sin(2 ** i * np.pi * grid_x))
-input_stack.append(grid_y)
+    input_stack.append(torch.sin(2 ** i * np.pi * local_x_norm))
+input_stack.append(local_y_norm)
 for i in range(encoding_dim_y - 1):
-    input_stack.append(torch.sin(2 ** i * np.pi * grid_y))
+    input_stack.append(torch.sin(2 ** i * np.pi * local_y_norm))
 
 coords = torch.stack(input_stack, dim=-1)
-coords = coords.reshape(-1, pos_dim)
+coords = coords.reshape(-1, encoding_dim_x + encoding_dim_y)
 
-# Calculate grid index for each pixel
-x_idx = torch.arange(W, device=device)
-y_idx = torch.arange(H, device=device)
-x_grid_idx = torch.div(x_idx * n_grid, W, rounding_mode='floor').clamp(max=n_grid-1)
-y_grid_idx = torch.div(y_idx * n_grid, H, rounding_mode='floor').clamp(max=n_grid-1)
-grid_idx_map = x_grid_idx[:, None] * n_grid + y_grid_idx[None, :]
+# gridインデックスの計算もlocal_x, local_yの後に修正
+grid_idx_map = x_grid_idx * n_grid + y_grid_idx
 grid_idx_flat = grid_idx_map.reshape(-1)  # (H*W,)
 
 fusion = FeaturePositionalFusion(C_in + pos_dim, C_in, pos_dim).to(device)
