@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from datetime import datetime
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -11,6 +12,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import imageio
+
+torch.cuda.reset_peak_memory_stats() # For memory stats
 
 """
 neural texture & tiny MLP renderer
@@ -51,7 +54,8 @@ Config
 """
 EPOCH_NUM = 1000
 video_interval = 50
-H, W = 512, 512
+# H, W = 512, 512
+H, W = 890, 1600
 CHANEL = 3
 gt_image_path = 'resources/checkered_boots_cropped.png'
 result_dir = 'result'
@@ -74,7 +78,7 @@ os.makedirs(in_training_imgs_dir)
 Loading and processing GT image
 """
 gt_image = Image.open(gt_image_path)
-gt_image = gt_image.resize((H, W)) # fit to kernel_size
+gt_image = gt_image.resize((W, H)) # fit to kernel_size
 gt_image = gt_image.convert('RGB')
 gt_image_array = np.array(gt_image)
 gt_image_array = gt_image_array / 255.0
@@ -98,11 +102,25 @@ progress_bar = tqdm(range(1, EPOCH_NUM + 1))
 progress_bar.set_description("[train]")
 loss_records = []
 
+forward_time_list = []
+backward_time_list = []
+
 for epoch in progress_bar:
     optimizer.zero_grad()
+
+    torch.cuda.synchronize()
+    start = time.perf_counter()
     pred = model(Fscr)
+    torch.cuda.synchronize()
+    forward_time_list.append(time.perf_counter() - start)
+
+    torch.cuda.synchronize()
+    start = time.perf_counter()
     loss = F.mse_loss(pred, flat_target_tensor, reduction='sum')
     loss.backward()
+    torch.cuda.synchronize()
+    backward_time_list.append(time.perf_counter() - start)
+
     optimizer.step()
 
     with torch.no_grad():
@@ -119,6 +137,12 @@ for epoch in progress_bar:
             plt.imsave(os.path.join(in_training_imgs_dir, f'rendered_output_image_{epoch}.png'), output_img_array)
 
 print('Training complete')
+
+# Showing training metrics
+print(f"Forward average time: {np.mean(forward_time_list):.6f} Sec")
+print(f"Backward average time: {np.mean(backward_time_list):.6f} Sec")
+max_mem = torch.cuda.max_memory_allocated()
+print(f"Max GPU memory: {max_mem / 1024 ** 2:.2f} MB")
 
 """
 Postprocessing
